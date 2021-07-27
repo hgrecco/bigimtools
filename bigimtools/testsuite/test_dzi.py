@@ -65,24 +65,24 @@ def compare_dz(
 
 @pytest.mark.parametrize("tile_size", (64, 128, 256))
 @pytest.mark.parametrize("overlap", (0, 16, 32))
-def test_dzi_from_image(camera_dzi, tmpdir_factory, tile_size, overlap):
+def test_dzi_from_image(
+    imcamera, camera_dzi, tmpdir_factory, tile_size, overlap
+):
 
     stem = f"camera_{tile_size}_{overlap}"
 
     tmpfolder = tmpdir_factory.mktemp("dzi")
 
-    with (camera_dzi / "original.png").open("rb") as fi:
-        source = PIL.Image.open(fi)
-        source.load()
-
     output = tmpfolder.join(stem + ".dzi")
-    dzi.from_image(source, output, tile_size=tile_size, overlap=overlap)
+    dzi.from_image(
+        imcamera, output, tile_size=tile_size, overlap=overlap
+    )
 
     compare_dz(camera_dzi, pathlib.Path(tmpfolder), stem)
 
 
-@pytest.mark.parametrize("tile_size", (64, 128, 256))
-@pytest.mark.parametrize("overlap", (0, 16, 32))
+@pytest.mark.parametrize("tile_size", (64,))
+@pytest.mark.parametrize("overlap", (0,))
 def test_dzi_from_tiles(camera_dzi, tmpdir_factory, tile_size, overlap):
 
     stem = f"camera_{tile_size}_{overlap}"
