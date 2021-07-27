@@ -8,11 +8,7 @@
     :license: BSD, see LICENSE for more details.
 """
 
-try:
-    from importlib.metadata import version
-except ImportError:
-    # Backport for Python < 3.8
-    from importlib_metadata import version
+from importlib.metadata import version
 
 try:  # pragma: no cover
     __version__ = version("bigimtools")
