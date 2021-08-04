@@ -75,7 +75,12 @@ def test_dzi_from_image(
 
     output = tmpfolder.join(stem + ".dzi")
     dzi.from_image(
-        imcamera, output, tile_size=tile_size, overlap=overlap
+        imcamera,
+        output,
+        tile_size=tile_size,
+        overlap=overlap,
+        rescale=dzi.Rescale.NONE,
+        fmt=dzi.Format.PNG8,
     )
 
     compare_dz(camera_dzi, pathlib.Path(tmpfolder), stem)
@@ -97,6 +102,12 @@ def test_dzi_from_tiles(camera_dzi, tmpdir_factory, tile_size, overlap):
             ] = np.array(PIL.Image.open(fi))
 
     output = tmpfolder.join(stem + ".dzi")
-    dzi.from_tiles(tiles, output, overlap=overlap)
+    dzi.from_tiles(
+        tiles,
+        output,
+        overlap=overlap,
+        rescale=dzi.Rescale.NONE,
+        fmt=dzi.Format.PNG8,
+    )
 
     compare_dz(camera_dzi, pathlib.Path(tmpfolder), stem)
