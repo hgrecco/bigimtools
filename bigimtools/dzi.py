@@ -31,12 +31,76 @@ from . import tiler
 NS_DEEPZOOM = "http://schemas.microsoft.com/deepzoom/2008"
 
 
+class Rescale(enum.IntEnum):
+    NONE = 0
+    MIN_MAX = 1
+    MAX = 2
+
+
+class Format(enum.IntEnum):
+    JPEG8 = 0
+    PNG8 = 1
+    PNG16 = 2
+    PNG32 = 3
+
+
 class ResizeFilters(enum.Enum):
     CUBIC = PIL.Image.CUBIC
     BILINEAR = PIL.Image.BILINEAR
     BICUBIC = PIL.Image.BICUBIC
     NEAREST = PIL.Image.NEAREST
     ANTIALIAS = PIL.Image.ANTIALIAS
+
+
+def save_image(arr, path, fmt, rescale, jpeg_image_quality=0.8):
+    """Save array to file, rescaling intensity.
+
+    Parameters
+    ----------
+    arr : ndarray
+        numpy ndarray.
+    path : str
+        Destination file.
+    fmt : Format
+        File format
+    rescale: Rescale or (number, number)
+        Intensity rescale type or (minimum, maximum) values.
+    jpeg_image_quality : float
+        clampled between 0 and 1
+    """
+
+    if rescale is Rescale.NONE:
+        pass
+    elif rescale is Rescale.MIN_MAX:
+        mn, mx = arr.min(), arr.max()
+        arr = (arr - mn) / (mx - mn)
+    elif rescale is Rescale.MAX:
+        arr = arr / arr.max()
+    elif isinstance(rescale, tuple) and len(rescale) == 2:
+        arr = (arr - rescale[0]) / (rescale[1] - rescale[0])
+    else:
+        raise ValueError(
+            "rescale must be a tuple of two number or Rescale"
+        )
+
+    if fmt in (Format.JPEG8, Format.PNG8):
+        arr = arr.astype(np.uint8)
+    elif fmt is Format.PNG16:
+        arr = arr.astype(np.uint16)
+    elif fmt is Format.PNG32:
+        arr = arr.astype(np.uint32)
+    else:
+        raise ValueError("rescale must be a Format")
+
+    tile = PIL.Image.fromarray(arr)
+
+    path = str(path) + "." + ("jpg" if fmt is Format.JPEG8 else "png")
+
+    with open(path, "wb") as tile_file:
+        if fmt is Format.JPEG8:
+            tile.save(tile_file, "JPEG", quality=jpeg_image_quality)
+        else:
+            tile.save(tile_file)
 
 
 @dataclass(frozen=True)
@@ -175,7 +239,8 @@ def from_image(
     tile_size=254,
     overlap=1,
     resize_filter=ResizeFilters.ANTIALIAS,
-    fmt="png",
+    fmt=Format.PNG32,
+    rescale=Rescale.MIN_MAX,
     jpeg_image_quality=0.8,
 ):
     """
@@ -191,9 +256,11 @@ def from_image(
         Size of a tile.
     overlap : int
         Overlap between tiles.
-    fmt : str
-        jpg, png
     resize_filter : ResizeFilters
+    fmt : Format
+        File format
+    rescale: Rescale or (number, number)
+        Rescale type o tuple of (min, max)
     jpeg_image_quality : float
         clampled between 0 and 1
     """
@@ -227,7 +294,7 @@ def from_image(
         height=sz1,
         tile_size=tile_size,
         tile_overlap=overlap,
-        tile_format=fmt,
+        tile_format="jpg" if fmt is Format.JPEG8 else "png",
     )
 
     if not (0 <= jpeg_image_quality <= 1):
@@ -235,8 +302,6 @@ def from_image(
             f"jpeg_image_quality has to be in range (0, 1), "
             f"not {jpeg_image_quality}"
         )
-
-    jpeg_image_quality = int(jpeg_image_quality * 100)
 
     image_files = _get_or_create_path(_get_files_path(destination))
 
@@ -257,17 +322,15 @@ def from_image(
             bounds = descriptor.get_tile_bounds(level, ndx0, ndx1)
             tile = level_image.crop(bounds)
 
-            tile_path = os.path.join(
-                level_dir, "%s_%s.%s" % (ndx0, ndx1, fmt)
-            )
+            tile_path = os.path.join(level_dir, "%s_%s" % (ndx0, ndx1))
 
-            with open(tile_path, "wb") as tile_file:
-                if fmt == "jpg":
-                    tile.save(
-                        tile_file, "JPEG", quality=jpeg_image_quality
-                    )
-                else:
-                    tile.save(tile_file)
+            save_image(
+                np.asarray(tile),
+                tile_path,
+                fmt,
+                rescale,
+                int(jpeg_image_quality * 100),
+            )
 
     descriptor.to_file(destination)
 
@@ -277,7 +340,8 @@ def from_tiles(
     destination,
     overlap=1,
     resize_filter=ResizeFilters.ANTIALIAS,
-    fmt="png",
+    fmt=Format.PNG32,
+    rescale=Rescale.MIN_MAX,
     jpeg_image_quality=0.8,
 ):
     """
@@ -291,9 +355,11 @@ def from_tiles(
         Destination dzi image.
     overlap : int
         Overlap between tiles.
-    fmt : str
-        jpg, png
     resize_filter : ResizeFilters
+    fmt : Format
+        File format
+    rescale: Rescale or (number, number)
+        Rescale type o tuple of (min, max)
     jpeg_image_quality : float
         clampled between 0 and 1
     """
@@ -312,6 +378,25 @@ def from_tiles(
         if len(tile_size) != 2 or tile_size[0] != tile_size[1]:
             raise ValueError("Only squared tiles are accepted.")
         tile_size = tile_size[0]
+
+    if rescale is Rescale.NONE:
+        pass
+    elif isinstance(rescale, tuple) and len(rescale) == 2:
+        pass
+    else:
+        mn, mx = np.inf, -np.inf
+        for v in tiles.values():
+            mn = min(mn, v.min())
+            mx = max(mx, v.max())
+
+        if rescale is Rescale.MIN_MAX:
+            rescale = mn, mx
+        elif rescale is Rescale.MAX:
+            rescale = 0, mx
+        else:
+            raise ValueError(
+                "rescale must be a tuple of two number or Rescale"
+            )
 
     tsz0 = tsz1 = tile_size
     ov0 = ov1 = overlap
@@ -333,7 +418,7 @@ def from_tiles(
         height=sz1,
         tile_size=tile_size,
         tile_overlap=overlap,
-        tile_format=fmt,
+        tile_format="jpg" if fmt is Format.JPEG8 else "png",
     )
 
     if not (0 <= jpeg_image_quality <= 1):
@@ -341,8 +426,6 @@ def from_tiles(
             f"jpeg_image_quality has to be in range (0, 1), "
             f"not {jpeg_image_quality}"
         )
-
-    jpeg_image_quality = int(jpeg_image_quality * 100)
 
     image_files = _get_or_create_path(_get_files_path(destination))
 
@@ -352,19 +435,15 @@ def from_tiles(
         )
 
         for (ndx0, ndx1) in descriptor.get_tiles(level):
-            tile_path = os.path.join(
-                level_dir, "%s_%s.%s" % (ndx0, ndx1, fmt)
+            tile_path = os.path.join(level_dir, "%s_%s" % (ndx0, ndx1))
+
+            save_image(
+                tiles[(ndx0, ndx1)],
+                tile_path,
+                fmt,
+                rescale,
+                int(jpeg_image_quality * 100),
             )
-
-            tile = PIL.Image.fromarray(tiles[(ndx0, ndx1)])
-
-            with open(tile_path, "wb") as tile_file:
-                if fmt == "jpg":
-                    tile.save(
-                        tile_file, "JPEG", quality=jpeg_image_quality
-                    )
-                else:
-                    tile.save(tile_file)
 
         if level == 0:
             break
