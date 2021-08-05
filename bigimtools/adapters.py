@@ -12,7 +12,7 @@ from __future__ import annotations
 import pathlib
 
 import numpy as np
-import PIL.Image
+from skimage import io as skio
 
 from . import tiler
 
@@ -82,14 +82,14 @@ class TiledFolder:
     def __getitem__(self, item):
         with self.folder.joinpath(
             "_".join(check_pair(item)) + self.ext
-        ).open("r") as fi:
-            return PIL.Image.open(fi)
+        ).open("rb") as fi:
+            return skio.imread(fi)
 
     def __setitem__(self, item, value):
         with self.folder.joinpath(
             "_".join(check_pair(item)) + self.ext
-        ).open("w") as fo:
-            value.save(fo)
+        ).open("wb") as fo:
+            skio.imsave(fo, value)
 
     def keys(self):
         for p in self.folder.iterdir():

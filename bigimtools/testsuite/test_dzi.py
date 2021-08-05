@@ -137,17 +137,6 @@ def test_rescale_mode_to_range(imcamera, offset, factor, astype):
         (imarray.min(), imarray.max()),
     )
 
-    img = PIL.Image.fromarray(imarray)
-    assert dzi.rescale_mode_to_range(img, dzi.RescaleMode.NONE) is None
-    np.testing.assert_allclose(
-        dzi.rescale_mode_to_range(img, dzi.RescaleMode.MAX),
-        (0, imarray.max()),
-    )
-    np.testing.assert_allclose(
-        dzi.rescale_mode_to_range(img, dzi.RescaleMode.MIN_MAX),
-        (imarray.min(), imarray.max()),
-    )
-
     tiles = {
         1: imarray[:10, :10],
         2: imarray[10:, :10],

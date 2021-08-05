@@ -24,7 +24,10 @@ import xml.dom.minidom
 from dataclasses import dataclass
 
 import numpy as np
-import PIL.Image
+import skimage.io
+from skimage import exposure
+from skimage import io as skio
+from skimage import transform
 
 from . import tiler
 
@@ -44,12 +47,13 @@ class ImageFormat(enum.IntEnum):
     PNG32 = 3
 
 
-class ResizeFilters(enum.Enum):
-    CUBIC = PIL.Image.CUBIC
-    BILINEAR = PIL.Image.BILINEAR
-    BICUBIC = PIL.Image.BICUBIC
-    NEAREST = PIL.Image.NEAREST
-    ANTIALIAS = PIL.Image.ANTIALIAS
+class ResizeFilters(enum.IntEnum):
+    NEAREST = 0
+    BILINEAR = 1
+    QUADRATIC = 2
+    CUBIC = 3
+    QUARTIC = 4
+    QUINTIC = 5
 
 
 def rescale_mode_to_range(obj, rescale_mode):
@@ -57,7 +61,7 @@ def rescale_mode_to_range(obj, rescale_mode):
 
     Parameters
     ----------
-    obj : ndarray or PIL.Image.Image or dict[Any, np.ndarray]
+    obj : ndarray or dict[Any, np.ndarray]
         numpy ndarray.
     rescale_mode: RescaleMode
         Intensity rescale_mode type or (minimum, maximum) values.
@@ -66,9 +70,7 @@ def rescale_mode_to_range(obj, rescale_mode):
     if rescale_mode is RescaleMode.NONE:
         return None
 
-    if isinstance(obj, PIL.Image.Image):
-        rng = obj.getextrema()
-    elif isinstance(obj, np.ndarray):
+    if isinstance(obj, np.ndarray):
         rng = obj.min(), obj.max()
     else:
         mn, mx = np.inf, -np.inf
@@ -85,7 +87,7 @@ def rescale_mode_to_range(obj, rescale_mode):
         raise ValueError("rescale_mode must be RescaleMode")
 
 
-def save_image(arr, path, fmt, output_range, jpeg_image_quality=0.8):
+def save_image(arr, path, fmt, in_range, jpeg_image_quality=0.8):
     """Save array to file, rescaling intensity.
 
     Parameters
@@ -96,43 +98,38 @@ def save_image(arr, path, fmt, output_range, jpeg_image_quality=0.8):
         Destination file.
     fmt : ImageFormat
         File format
-    output_range: (number, number) or None
-        Output intensity range or None to not rescale_mode.
+    in_range: (number, number) or None
+        Input intensity range that will be mapped to the full dtype range or None to not rescale.
     jpeg_image_quality : float
         clampled between 0 and 1
     """
 
-    if output_range is None:
+    if fmt in (ImageFormat.JPEG8, ImageFormat.PNG8):
+        dtype = np.uint8
+    elif fmt is ImageFormat.PNG16:
+        dtype = np.uint16
+    elif fmt is ImageFormat.PNG32:
+        dtype = np.uint32
+    else:
+        raise ValueError("rescale_mode must be a ImageFormat")
+
+    if in_range is None:
         pass
-    elif isinstance(output_range, tuple) and len(output_range) == 2:
-        arr = (arr - output_range[0]) / (
-            output_range[1] - output_range[0]
-        )
+    elif isinstance(in_range, tuple) and len(in_range) == 2:
+        arr = exposure.rescale_intensity(arr, in_range, dtype)
     else:
         raise ValueError(
             "rescale_mode must be a tuple of two number or None"
         )
 
-    if fmt in (ImageFormat.JPEG8, ImageFormat.PNG8):
-        arr = arr.astype(np.uint8)
-    elif fmt is ImageFormat.PNG16:
-        arr = arr.astype(np.uint16)
-    elif fmt is ImageFormat.PNG32:
-        arr = arr.astype(np.uint32)
-    else:
-        raise ValueError("rescale_mode must be a ImageFormat")
-
-    tile = PIL.Image.fromarray(arr)
-
     path = (
         str(path) + "." + ("jpg" if fmt is ImageFormat.JPEG8 else "png")
     )
 
-    with open(path, "wb") as tile_file:
-        if fmt is ImageFormat.JPEG8:
-            tile.save(tile_file, "JPEG", quality=jpeg_image_quality)
-        else:
-            tile.save(tile_file)
+    if fmt is ImageFormat.JPEG8:
+        skimage.io.imsave(path, arr, quality=jpeg_image_quality)
+    else:
+        skimage.io.imsave(path, arr)
 
 
 @dataclass(frozen=True)
@@ -270,7 +267,7 @@ def from_image(
     destination,
     tile_size=254,
     overlap=1,
-    resize_filter=ResizeFilters.ANTIALIAS,
+    resize_filter=ResizeFilters.QUADRATIC,
     fmt=ImageFormat.PNG32,
     rescale_mode=RescaleMode.MIN_MAX,
     jpeg_image_quality=0.8,
@@ -280,7 +277,7 @@ def from_image(
 
     Parameters
     ----------
-    source : str or PIL.Image or ndarray
+    source : str or ndarray
         Source file of an image or image
     destination : str
         Destination dzi image.
@@ -297,12 +294,10 @@ def from_image(
         clampled between 0 and 1
     """
 
-    if isinstance(source, np.ndarray):
-        img = PIL.Image.fromarray(source)
-    elif isinstance(source, PIL.Image.Image):
-        img = source
+    if isinstance(source, str):
+        img = skio.imread(source)
     else:
-        img = PIL.Image.open(source)
+        img = source
 
     if isinstance(tile_size, (tuple, list)):
         if len(tile_size) != 2 or tile_size[0] != tile_size[1]:
@@ -321,11 +316,11 @@ def from_image(
         overlap = overlap[0]
 
     if isinstance(rescale_mode, tuple) and len(rescale_mode) == 2:
-        output_range = rescale_mode
+        in_range = rescale_mode
     else:
-        output_range = rescale_mode_to_range(img, rescale_mode)
+        in_range = rescale_mode_to_range(img, rescale_mode)
 
-    sz0, sz1 = img.size
+    sz0, sz1 = img.shape
     descriptor = DeepZoomImageDescriptor(
         width=sz0,
         height=sz1,
@@ -351,13 +346,15 @@ def from_image(
         if level_width == sz0 and level_height == sz1:
             level_image = img
         else:
-            level_image = img.resize(
-                (level_width, level_height), resize_filter.value
+            level_image = transform.resize(
+                img, (level_width, level_height), resize_filter.value
             )
 
         for (ndx0, ndx1) in descriptor.get_tiles(level):
-            bounds = descriptor.get_tile_bounds(level, ndx0, ndx1)
-            tile = level_image.crop(bounds)
+            tile = _crop(
+                level_image,
+                descriptor.get_tile_bounds(level, ndx0, ndx1),
+            )
 
             tile_path = os.path.join(level_dir, "%s_%s" % (ndx0, ndx1))
 
@@ -365,7 +362,7 @@ def from_image(
                 np.asarray(tile),
                 tile_path,
                 fmt,
-                output_range,
+                in_range,
                 int(jpeg_image_quality * 100),
             )
 
@@ -376,7 +373,7 @@ def from_tiles(
     tiles: dict[(int, int), np.ndarray],
     destination,
     overlap=1,
-    resize_filter=ResizeFilters.ANTIALIAS,
+    resize_filter=ResizeFilters.QUADRATIC,
     fmt=ImageFormat.PNG32,
     rescale_mode=RescaleMode.MIN_MAX,
     jpeg_image_quality=0.8,
@@ -417,9 +414,9 @@ def from_tiles(
         tile_size = tile_size[0]
 
     if isinstance(rescale_mode, tuple) and len(rescale_mode) == 2:
-        output_range = rescale_mode
+        in_range = rescale_mode
     else:
-        output_range = rescale_mode_to_range(tiles, rescale_mode)
+        in_range = rescale_mode_to_range(tiles, rescale_mode)
 
     tsz0 = tsz1 = tile_size
     ov0 = ov1 = overlap
@@ -464,7 +461,7 @@ def from_tiles(
                 tiles[(ndx0, ndx1)],
                 tile_path,
                 fmt,
-                output_range,
+                in_range,
                 int(jpeg_image_quality * 100),
             )
 
@@ -476,7 +473,7 @@ def from_tiles(
         level_width, level_height = descriptor.get_dimensions(level - 1)
         for (ndx0, ndx1) in descriptor.get_tiles(level - 1):
             if len(tiles) == 1:
-                level_dict[(0, 0)] = _resize(
+                level_dict[(0, 0)] = transform.resize(
                     tiles[(0, 0)],
                     (level_width, level_height),
                     resize_filter.value,
@@ -488,7 +485,7 @@ def from_tiles(
                 }
 
                 joined = tiler.join_tiles(parts, overlap)
-                level_dict[(ndx0, ndx1)] = _resize(
+                level_dict[(ndx0, ndx1)] = transform.resize(
                     joined, (tile_size, tile_size), resize_filter.value
                 )
 
@@ -507,12 +504,12 @@ def _get_files_path(path):
     return os.path.splitext(path)[0] + "_files"
 
 
+def _crop(arr, bounds):
+    a, b, c, d = bounds
+    return arr[b:d, a:c]
+
+
 def _remove(path):
     os.remove(path)
     tiles_path = _get_files_path(path)
     shutil.rmtree(tiles_path)
-
-
-def _resize(im, shape, resample):
-    pim = PIL.Image.fromarray(im)
-    return np.asarray(pim.resize(shape, resample))
