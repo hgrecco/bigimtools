@@ -79,8 +79,8 @@ def test_dzi_from_image(
         output,
         tile_size=tile_size,
         overlap=overlap,
-        rescale=dzi.Rescale.NONE,
-        fmt=dzi.Format.PNG8,
+        rescale_mode=dzi.RescaleMode.NONE,
+        fmt=dzi.ImageFormat.PNG8,
     )
 
     compare_dz(camera_dzi, pathlib.Path(tmpfolder), stem)
@@ -106,8 +106,62 @@ def test_dzi_from_tiles(camera_dzi, tmpdir_factory, tile_size, overlap):
         tiles,
         output,
         overlap=overlap,
-        rescale=dzi.Rescale.NONE,
-        fmt=dzi.Format.PNG8,
+        rescale_mode=dzi.RescaleMode.NONE,
+        fmt=dzi.ImageFormat.PNG8,
     )
 
     compare_dz(camera_dzi, pathlib.Path(tmpfolder), stem)
+
+
+@pytest.mark.parametrize(
+    "offset,factor,astype",
+    (
+        (0, 1, np.uint8),
+        (4, 4, np.uint16),
+        (5, 10, np.uint32),
+        (11.2, 32.5, np.float),
+    ),
+)
+def test_rescale_mode_to_range(imcamera, offset, factor, astype):
+
+    imarray = (offset + np.array((imcamera)) * factor).astype(astype)
+    assert (
+        dzi.rescale_mode_to_range(imarray, dzi.RescaleMode.NONE) is None
+    )
+    np.testing.assert_allclose(
+        dzi.rescale_mode_to_range(imarray, dzi.RescaleMode.MAX),
+        (0, imarray.max()),
+    )
+    np.testing.assert_allclose(
+        dzi.rescale_mode_to_range(imarray, dzi.RescaleMode.MIN_MAX),
+        (imarray.min(), imarray.max()),
+    )
+
+    img = PIL.Image.fromarray(imarray)
+    assert dzi.rescale_mode_to_range(img, dzi.RescaleMode.NONE) is None
+    np.testing.assert_allclose(
+        dzi.rescale_mode_to_range(img, dzi.RescaleMode.MAX),
+        (0, imarray.max()),
+    )
+    np.testing.assert_allclose(
+        dzi.rescale_mode_to_range(img, dzi.RescaleMode.MIN_MAX),
+        (imarray.min(), imarray.max()),
+    )
+
+    tiles = {
+        1: imarray[:10, :10],
+        2: imarray[10:, :10],
+        3: imarray[:10, 10:],
+        4: imarray[10:, 10:],
+    }
+    assert (
+        dzi.rescale_mode_to_range(tiles, dzi.RescaleMode.NONE) is None
+    )
+    np.testing.assert_allclose(
+        dzi.rescale_mode_to_range(tiles, dzi.RescaleMode.MAX),
+        (0, imarray.max()),
+    )
+    np.testing.assert_allclose(
+        dzi.rescale_mode_to_range(tiles, dzi.RescaleMode.MIN_MAX),
+        (imarray.min(), imarray.max()),
+    )
