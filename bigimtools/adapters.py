@@ -35,10 +35,33 @@ class TiledH5PY:
         self.content = content
 
     def __getitem__(self, item):
-        return self.content["_".join(check_pair(item))]
+        return self.content["_".join(str(i) for i in check_pair(item))]
 
     def __setitem__(self, item, value):
-        self.content["_".join(check_pair(item))] = value
+        self.content["_".join(str(i) for i in check_pair(item))] = value
+
+    def __len__(self):
+        return len(self.content)
+
+    def keys(self):
+        def _key_to_tuple(key):
+            return tuple(int(string) for string in key.split("_"))
+
+        for key in self.content.keys():
+            yield _key_to_tuple(key)
+
+    def values(self):
+        return self.content.values()
+
+    def items(self):
+        for k in self.keys():
+            yield (k, self[k])
+
+    def get(self, item, value=None):
+        try:
+            return self[item]
+        except KeyError:
+            return value
 
 
 class TiledFolder:

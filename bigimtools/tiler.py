@@ -191,6 +191,8 @@ def equalize_tiles(
     ndx0s, ndx1s = zip(*tiles.keys())
 
     for ndx0, ndx1 in scan_func((max(ndx0s), max(ndx1s)), init):
+        ndx0 = int(ndx0)
+        ndx1 = int(ndx1)
         tile = tiles[(ndx0, ndx1)]
 
         corr1 = est_func(
