@@ -39,13 +39,14 @@ class TiledH5PY:
 
     def __setitem__(self, item, value):
         self.content["_".join(str(i) for i in check_pair(item))] = value
-    
+
     def __len__(self):
-        return(len(self.content))
-    
+        return len(self.content)
+
     def keys(self):
         def _key_to_tuple(key):
             return tuple(int(string) for string in key.split("_"))
+
         for key in self.content.keys():
             yield _key_to_tuple(key)
 
@@ -55,12 +56,13 @@ class TiledH5PY:
     def items(self):
         for k in self.keys():
             yield (k, self[k])
-    
+
     def get(self, item, value=None):
         try:
             return self[item]
         except KeyError:
             return value
+
 
 class TiledFolder:
     """A tile ndarray maps all data to a
