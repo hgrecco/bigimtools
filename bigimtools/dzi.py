@@ -24,10 +24,10 @@ import xml.dom.minidom
 from dataclasses import dataclass
 
 import numpy as np
+import PIL
 import skimage.io
 from skimage import exposure
 from skimage import io as skio
-from skimage import transform
 
 from . import tiler
 
@@ -47,13 +47,12 @@ class ImageFormat(enum.IntEnum):
     PNG32 = 3
 
 
-class ResizeFilters(enum.IntEnum):
-    NEAREST = 0
-    BILINEAR = 1
-    QUADRATIC = 2
-    CUBIC = 3
-    QUARTIC = 4
-    QUINTIC = 5
+class ResizeFilters(enum.Enum):
+    CUBIC = PIL.Image.CUBIC
+    BILINEAR = PIL.Image.BILINEAR
+    BICUBIC = PIL.Image.BICUBIC
+    NEAREST = PIL.Image.NEAREST
+    ANTIALIAS = PIL.Image.ANTIALIAS
 
 
 def rescale_mode_to_range(obj, rescale_mode):
@@ -267,7 +266,7 @@ def from_image(
     destination,
     tile_size=254,
     overlap=1,
-    resize_filter=ResizeFilters.QUADRATIC,
+    resize_filter=ResizeFilters.ANTIALIAS,
     fmt=ImageFormat.PNG32,
     rescale_mode=RescaleMode.MIN_MAX,
     jpeg_image_quality=0.8,
@@ -346,7 +345,7 @@ def from_image(
         if level_width == sz0 and level_height == sz1:
             level_image = img
         else:
-            level_image = transform.resize(
+            level_image = _pil_resize(
                 img, (level_width, level_height), resize_filter.value
             )
 
@@ -373,7 +372,7 @@ def from_tiles(
     tiles: dict[(int, int), np.ndarray],
     destination,
     overlap=1,
-    resize_filter=ResizeFilters.QUADRATIC,
+    resize_filter=ResizeFilters.ANTIALIAS,
     fmt=ImageFormat.PNG32,
     rescale_mode=RescaleMode.MIN_MAX,
     jpeg_image_quality=0.8,
@@ -473,7 +472,7 @@ def from_tiles(
         level_width, level_height = descriptor.get_dimensions(level - 1)
         for (ndx0, ndx1) in descriptor.get_tiles(level - 1):
             if len(tiles) == 1:
-                level_dict[(0, 0)] = transform.resize(
+                level_dict[(0, 0)] = _pil_resize(
                     tiles[(0, 0)],
                     (level_width, level_height),
                     resize_filter.value,
@@ -485,13 +484,25 @@ def from_tiles(
                 }
 
                 joined = tiler.join_tiles(parts, overlap)
-                level_dict[(ndx0, ndx1)] = transform.resize(
+                level_dict[(ndx0, ndx1)] = _pil_resize(
                     joined, (tile_size, tile_size), resize_filter.value
                 )
 
         tiles = level_dict
 
     descriptor.to_file(destination)
+
+
+def _pil_resize(
+    img: np.ndarray,
+    size: tuple[(int, int)],
+    resize_filter=ResizeFilters.ANTIALIAS,
+):
+    """Helper function to leverage the efficiency of PIL resize against the practicality of
+    working with arrays and scikit-image."""
+    return np.array(
+        PIL.Image.fromarray(img).resize(size, resize_filter)
+    )
 
 
 def _get_or_create_path(path):
