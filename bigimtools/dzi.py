@@ -125,10 +125,16 @@ def save_image(arr, path, fmt, in_range, jpeg_image_quality=0.8):
         str(path) + "." + ("jpg" if fmt is ImageFormat.JPEG8 else "png")
     )
 
+    # Write empty array as a black pixel
+    if len(arr) == 0:
+        arr = np.array([[0]])
+
     if fmt is ImageFormat.JPEG8:
-        skimage.io.imsave(path, arr, quality=jpeg_image_quality)
+        skimage.io.imsave(
+            path, arr, quality=jpeg_image_quality, check_contrast=False
+        )
     else:
-        skimage.io.imsave(path, arr)
+        skimage.io.imsave(path, arr, check_contrast=False)
 
 
 @dataclass(frozen=True)
