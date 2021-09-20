@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.optimize import dual_annealing
+from scipy.spatial.distance import euclidean
 
 
 class ConstantDict:
@@ -194,7 +196,7 @@ def equalize_tiles(
         ndx0 = int(ndx0)
         ndx1 = int(ndx1)
         tile = tiles[(ndx0, ndx1)]
-
+        print((ndx0, ndx1))
         corr1 = est_func(
             tile[-ov0:, :],
             tiles.get((ndx0 + 1, ndx1), _NaNArray)[:+ov0, :]
@@ -341,3 +343,128 @@ def tiledict_info(
         dtype = default_dtype
 
     return (max(ndx0s) + 1, max(ndx1s) + 1), shapes.pop(), dtype
+
+
+def comparison_median(
+    tiles: dict[(int, int), np.ndarray],
+    key1: tuple[int, int],
+    key2: tuple[int, int],
+    overlap: tuple[int, int],
+    est_func=estimate_correction,
+):
+    """Index agnostic comparison of two tiles by the median of the overlap criterion."""
+    dist = euclidean(key1, key2)
+    ov0, ov1 = overlap
+    corr_value = 0
+    print("Key 1: {}".format(key1))
+    print("Key 2: {}".format(key2))
+    print("Distance: {}".format(dist))
+    if dist > 1.0:
+        return 0
+    elif dist == 0.0:
+        return 1
+    elif key2[0] == key1[0] + 1:
+        corr_value = est_func(
+            tiles[key1][-ov0:, :],
+            tiles.get(key2, _NaNArray)[:+ov0, :],
+        )  # Right
+    elif key2[0] == key1[0] - 1:
+        corr_value = est_func(
+            tiles[key1][:+ov0, :],
+            tiles.get(key2, _NaNArray)[-ov0:, :],
+        )  # Left
+    elif key2[1] == key1[1] + 1:
+        corr_value = est_func(
+            tiles[key1][:, -ov1:],
+            tiles.get(key2, _NaNArray)[:, :+ov1],
+        )  # Up
+    elif key2[1] == key1[1] - 1:
+        corr_value = est_func(
+            tiles[key1][:, :+ov1],
+            tiles.get(key2, _NaNArray)[:, -ov1:],
+        )  # Down
+    return corr_value
+
+
+def overlap_matrix(
+    tiles: dict[(int, int), np.ndarray],
+    overlap: tuple[int, int],
+    comp_function=comparison_median,
+):
+    """Makes an overlap matrix comparing all elements from a matrix according to comp_function."""
+    tiles_shape = tiledict_info(tiles)[0]
+    print(tiles_shape)
+    overlap_matrix = np.zeros(tiles_shape + tiles_shape)
+    for key in tiles.keys():
+        for sec_key in tiles.keys():
+            overlap_matrix[key][sec_key] = comp_function(
+                tiles, key, sec_key, overlap
+            )
+
+    return overlap_matrix
+
+
+def overlap_prod(overlap_matrix: np.ndarray, coef_matrix: np.ndarray):
+    """Product of ((m,n),(m,n)) matrix and (m,n) matrix"""
+    ii, jj = overlap_matrix.shape[:2]
+    if (ii, jj) != coef_matrix.shape:
+        raise ValueError(
+            "operands could not be broadcast together with shapes {} {}".format(
+                (ii, jj), coef_matrix.shape
+            )
+        )
+    out = np.zeros(coef_matrix.shape)
+    for i in range(ii):
+        for j in range(jj):
+            out[i][j] = np.sum(overlap_matrix[i][j] * coef_matrix)
+    return out
+
+
+def overlap_transpose_prod(
+    overlap_matrix: np.ndarray, coef_matrix: np.ndarray
+):
+    """Product of ((m,n),(m,n)) matrix and (m,n) matrix"""
+    ii, jj = overlap_matrix.shape[:2]
+    if (ii, jj) != coef_matrix.shape:
+        raise ValueError(
+            "operands could not be broadcast together with shapes {} {}".format(
+                (ii, jj), coef_matrix.shape
+            )
+        )
+    out = np.zeros(coef_matrix.shape)
+    for i in range(ii):
+        for j in range(jj):
+            out[i][j] = np.sum(overlap_matrix[j][i] * coef_matrix)
+    return out
+
+
+# Shape is passed as an argument because optimization is performed on 1d array.
+
+
+def coef_cost_fun(
+    coef_mat_flat: np.array,
+    coef_shape: tuple[int, int],
+    overlap_m: np.ndarray,
+):
+    """Cost function for brute force estimation of coefficient matrix"""
+    coef_mat = coef_mat_flat.reshape(coef_shape)
+    return np.linalg.norm(
+        overlap_prod(overlap_m, coef_mat)
+        - overlap_transpose_prod(overlap_m, coef_mat)
+    )
+
+
+def coef_matrix_brute_force(overlap_matrix: np.ndarray):
+    """Coefficient estimation via brute force."""
+    coef_shape = overlap_matrix.shape[:2]
+    coef_len = coef_shape[0] * coef_shape[1]
+    lw = [0] * coef_len
+    up = [3] * coef_len  # Arbitrary upper bound!
+    # minimizer_kwargs = {"args": (coef_shape, overlap_matrix)}
+    ret = dual_annealing(
+        coef_cost_fun,
+        bounds=list(zip(lw, up)),
+        args=(coef_shape, overlap_matrix),
+        x0=np.ones(coef_len),
+    )
+    return np.reshape(ret.x, coef_shape)
