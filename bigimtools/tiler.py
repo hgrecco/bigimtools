@@ -196,7 +196,6 @@ def equalize_tiles(
         ndx0 = int(ndx0)
         ndx1 = int(ndx1)
         tile = tiles[(ndx0, ndx1)]
-        print((ndx0, ndx1))
         corr1 = est_func(
             tile[-ov0:, :],
             tiles.get((ndx0 + 1, ndx1), _NaNArray)[:+ov0, :]
