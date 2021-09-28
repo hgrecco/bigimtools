@@ -98,3 +98,22 @@ def test_equalize_changed(imcamera, tile_size, overlap, init):
     for ndx0 in (3, 5, 13):
         for ndx1 in (4, 7, 20):
             assert corrections[(ndx0, ndx1)] == 1 / 13.0
+
+
+# Crashes test suite! Beware
+# @pytest.mark.parametrize("tile_size", ((3, 3), (5, 10), (10, 10)))
+# @pytest.mark.parametrize("overlap", ((5, 5), (3, 6), (6, 3)))
+# @pytest.mark.parametrize("init", ((1, 1), (5, 10), (10, 5)))
+# def test_ov_equalize_changed(imcamera, tile_size, overlap, init):
+
+#     tiles = dict(tiler.split_into_tiles(imcamera, tile_size, overlap))
+
+#     for ndx0 in (3, 5, 13):
+#         for ndx1 in (4, 7, 20):
+#             tiles[(ndx0, ndx1)] = tiles[(ndx0, ndx1)] * 13.0
+#     overlap_mat = tiler.overlap_matrix(tiles, overlap)
+#     corrections = tiler.coef_matrix_brute_force(overlap_mat)
+#     print(corrections)
+#     for ndx0 in (3, 5, 13):
+#         for ndx1 in (4, 7, 20):
+#             assert corrections[(ndx0, ndx1)] == 1 / 13.0
