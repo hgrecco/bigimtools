@@ -29,7 +29,7 @@ import skimage.io
 from skimage import exposure
 from skimage import io as skio
 
-from . import tiler
+from . import adapters, tiler
 
 NS_DEEPZOOM = "http://schemas.microsoft.com/deepzoom/2008"
 
@@ -375,9 +375,8 @@ def from_image(
 
 
 def from_tiles(
-    tiles: dict[(int, int), np.ndarray],
+    tiles: adapters.TiledImage,
     destination,
-    overlap=1,
     resize_filter=ResizeFilters.ANTIALIAS,
     fmt=ImageFormat.PNG32,
     rescale_mode=RescaleMode.MIN_MAX,
@@ -388,7 +387,7 @@ def from_tiles(
 
     Parameters
     ----------
-    tiles : dict[(int, int), np.ndarray)
+    tiles : adapters.TiledImage
         maps tile indices to tile.
     destination : str
         Destination dzi image.
@@ -403,6 +402,8 @@ def from_tiles(
         clampled between 0 and 1
     """
 
+    overlap = tiles.overlap
+
     if isinstance(overlap, (tuple, list)):
         if len(overlap) != 2 or overlap[0] != overlap[1]:
             raise ValueError(
@@ -411,27 +412,27 @@ def from_tiles(
             )
         overlap = overlap[0]
 
-    wall_shape, tile_size, dtype = tiler.tiledict_info(tiles)
+    grid_shape, tile_shape = (tiles.grid_shape, tiles.tile_shape)
 
-    if isinstance(tile_size, (tuple, list)):
-        if len(tile_size) != 2 or tile_size[0] != tile_size[1]:
+    if isinstance(tile_shape, (tuple, list)):
+        if len(tile_shape) != 2 or tile_shape[0] != tile_shape[1]:
             raise ValueError("Only squared tiles are accepted.")
-        tile_size = tile_size[0]
+        tile_shape = tile_shape[0]
 
     if isinstance(rescale_mode, tuple) and len(rescale_mode) == 2:
         in_range = rescale_mode
     else:
         in_range = rescale_mode_to_range(tiles, rescale_mode)
 
-    tsz0 = tsz1 = tile_size
+    tsz0 = tsz1 = tile_shape
     ov0 = ov1 = overlap
 
-    wsz0, wsz1 = wall_shape
+    gsz0, gsz1 = grid_shape
 
-    if wsz0 != wsz1:
-        raise ValueError("Only squared walls are accepted")
+    if gsz0 != gsz1:
+        raise ValueError("Only squared grids are accepted")
 
-    sz0, sz1 = wsz0 * (tsz0 - ov0), wsz1 * (tsz1 - ov1)
+    sz0, sz1 = gsz0 * (tsz0 - ov0), gsz1 * (tsz1 - ov1)
 
     if not math.log(sz0 / (tsz0 - ov0), 2).is_integer():
         raise ValueError(
@@ -441,7 +442,7 @@ def from_tiles(
     descriptor = DeepZoomImageDescriptor(
         width=sz0,
         height=sz1,
-        tile_size=tile_size,
+        tile_size=tile_shape,
         tile_overlap=overlap,
         tile_format="jpg" if fmt is ImageFormat.JPEG8 else "png",
     )
@@ -489,9 +490,13 @@ def from_tiles(
                     for (m, n) in ((0, 0), (0, 1), (1, 0), (1, 1))
                 }
 
-                joined = tiler.join_tiles(parts, overlap)
+                joined = tiler.join_tiles(
+                    adapters.TiledImage.from_dict(parts, overlap)
+                )
                 level_dict[(ndx0, ndx1)] = _pil_resize(
-                    joined, (tile_size, tile_size), resize_filter.value
+                    joined,
+                    (tile_shape, tile_shape),
+                    resize_filter.value,
                 )
 
         tiles = level_dict
