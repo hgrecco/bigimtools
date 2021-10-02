@@ -51,7 +51,7 @@ def test_tiled_mixin(imcamera):
 
 @pytest.mark.parametrize("tile_size", TEST_TILE_SIZES)
 @pytest.mark.parametrize("overlap", ((0, 0), (5, 5), (3, 6), (6, 3)))
-def test_round_trip(imcamera, tile_size, overlap):
+def test_split_and_join(imcamera, tile_size, overlap):
 
     tiles = to_tile(imcamera, tile_size, overlap)
 
@@ -67,32 +67,30 @@ def test_round_trip(imcamera, tile_size, overlap):
 @pytest.mark.parametrize("tile_size", TEST_TILE_SIZES)
 @pytest.mark.parametrize("overlap", ((5, 5), (3, 6), (6, 3)))
 @pytest.mark.parametrize("init", TEST_INIT)
-@pytest.mark.parametrize(
-    "equalizer",
-    (
-        (
-            False,
-            lambda t, i: tiler.estimate_corrections_seq(
-                t, i, est_func=lambda x, y: 2
-            ),
-        ),
-        (True, lambda t, i: tiler.estimate_corrections(t, i)),
-    ),
-)
-def test_equalize_simple1(
-    imcamera, tile_size, overlap, init, equalizer
-):
-    only_square, equalizer = equalizer
-    if only_square and (
-        tile_size[0] != tile_size[1] or overlap[0] != overlap[1]
-    ):
-        pytest.skip(
-            "This equalizer currently only works for square tiles/overlaps"
-        )
-
+def test_join_with_corrections(imcamera, tile_size, overlap, init):
     tiles = to_tile(imcamera, tile_size, overlap)
 
-    corrections = equalizer(tiles, init)
+    corrections = {k: 13.0 for k in tiles.keys()}
+    merge = tiler.join_tiles(tiles, corrections)
+
+    sh = imcamera.shape
+    merge = merge[: sh[0], : sh[1]]
+
+    np.testing.assert_allclose(
+        merge,
+        imcamera * 13.0,
+    )
+
+
+@pytest.mark.parametrize("tile_size", TEST_TILE_SIZES)
+@pytest.mark.parametrize("overlap", ((5, 5), (3, 6), (6, 3)))
+@pytest.mark.parametrize("init", TEST_INIT)
+def test_equalize_seq_est_func(imcamera, tile_size, overlap, init):
+    tiles = to_tile(imcamera, tile_size, overlap)
+
+    corrections = tiler.estimate_corrections_seq(
+        tiles, init, est_func=lambda x, y: 2
+    )
 
     grount_truth = {k: 2 for k, v in corrections.items()}
     grount_truth[init] = 1.0
@@ -103,32 +101,13 @@ def test_equalize_simple1(
 @pytest.mark.parametrize("tile_size", TEST_TILE_SIZES)
 @pytest.mark.parametrize("overlap", ((5, 5), (3, 6), (6, 3)))
 @pytest.mark.parametrize("init", TEST_INIT)
-@pytest.mark.parametrize(
-    "equalizer",
-    (
-        (
-            False,
-            lambda t, i: tiler.estimate_corrections_seq(
-                t, i, agg_func=lambda x: 3
-            ),
-        ),
-        (True, lambda t, i: tiler.estimate_corrections(t, i)),
-    ),
-)
-def test_equalize_simple2(
-    imcamera, tile_size, overlap, init, equalizer
-):
-    only_square, equalizer = equalizer
-    if only_square and (
-        tile_size[0] != tile_size[1] or overlap[0] != overlap[1]
-    ):
-        pytest.skip(
-            "This equalizer currently only works for square tiles/overlaps"
-        )
+def test_equalize_seq_agg_func(imcamera, tile_size, overlap, init):
 
     tiles = to_tile(imcamera, tile_size, overlap)
 
-    corrections = equalizer(tiles, init)
+    corrections = tiler.estimate_corrections_seq(
+        tiles, init, agg_func=lambda x: 3
+    )
 
     grount_truth = {k: 3 for k, v in corrections.items()}
     grount_truth[init] = 1.0
@@ -136,15 +115,17 @@ def test_equalize_simple2(
     assert_tiledict_all_close(corrections, grount_truth)
 
 
-@pytest.mark.parametrize("tile_size", TEST_TILE_SIZES)
-@pytest.mark.parametrize("overlap", ((5, 5), (3, 6), (6, 3)))
-@pytest.mark.parametrize("init", TEST_INIT)
-def test_equalize(imcamera, tile_size, overlap, init):
-    tiles = to_tile(imcamera, tile_size, overlap)
-    merge = tiler.join_tiles(tiles, tiler.ConstantDict(13))
-
-    sh = imcamera.shape
-    np.testing.assert_allclose(merge[: sh[0], : sh[1]], 13 * imcamera)
+def test_estimate_corrections():
+    tile_size = (5, 5)
+    overlap = (2, 2)
+    tiles = {}
+    tmp = np.ones(tile_size)
+    tiles[(0, 0)] = tmp
+    tiles[(0, 1)] = tmp * 2
+    result = tiler.estimate_corrections(
+        adapters.TiledImage.from_dict(tiles, overlap)
+    )
+    assert_tiledict_all_close(result, {(0, 0): 1, (0, 1): 1 / 2})
 
 
 @pytest.mark.parametrize("tile_size", TEST_TILE_SIZES)
@@ -157,7 +138,7 @@ def test_equalize(imcamera, tile_size, overlap, init):
         (True, lambda t, i: tiler.estimate_corrections(t, i)),
     ),
 )
-def test_equalize_change_init(
+def test_both_equalize_init(
     imcamera, tile_size, overlap, init, equalizer
 ):
     only_square, equalizer = equalizer
@@ -201,7 +182,7 @@ def test_equalize_change_init(
         (True, lambda t, i: tiler.estimate_corrections(t, i)),
     ),
 )
-def test_equalize_changed(
+def test_both_equalize_9changes(
     imcamera, tile_size, overlap, init, equalizer
 ):
     only_square, equalizer = equalizer
@@ -239,19 +220,6 @@ def test_build_matrix_simple():
     assert M2.shape == (10, 1)
     assert P1.shape == (1, 2)
     assert P2.shape == (1, 2)
-
-
-def test_equalize_simple():
-    tile_size = (5, 5)
-    overlap = (2, 2)
-    tiles = {}
-    tmp = np.ones(tile_size)
-    tiles[(0, 0)] = tmp
-    tiles[(0, 1)] = tmp * 2
-    result = tiler.estimate_corrections(
-        adapters.TiledImage.from_dict(tiles, overlap)
-    )
-    assert_tiledict_all_close(result, {(0, 0): 1, (0, 1): 1 / 2})
 
 
 # Crashes test suite! Beware
