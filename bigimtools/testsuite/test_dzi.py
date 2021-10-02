@@ -5,7 +5,7 @@ import PIL.Image
 import pytest
 from xmldiff.main import diff_files
 
-from bigimtools import dzi
+from bigimtools import adapters, dzi
 
 
 def compare_dz(
@@ -103,9 +103,8 @@ def test_dzi_from_tiles(camera_dzi, tmpdir_factory, tile_size, overlap):
 
     output = tmpfolder.join(stem + ".dzi")
     dzi.from_tiles(
-        tiles,
+        adapters.TiledImage.from_dict(tiles, overlap),
         output,
-        overlap=overlap,
         rescale_mode=dzi.RescaleMode.NONE,
         fmt=dzi.ImageFormat.PNG8,
     )
