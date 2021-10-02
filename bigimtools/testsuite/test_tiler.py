@@ -134,20 +134,13 @@ def test_estimate_corrections():
 @pytest.mark.parametrize(
     "equalizer",
     (
-        (False, lambda t, i: tiler.estimate_corrections_seq(t, i)),
-        (True, lambda t, i: tiler.estimate_corrections(t, i)),
+        lambda t, i: tiler.estimate_corrections_seq(t, i),
+        lambda t, i: tiler.estimate_corrections(t, i),
     ),
 )
 def test_both_equalize_init(
     imcamera, tile_size, overlap, init, equalizer
 ):
-    only_square, equalizer = equalizer
-    if only_square and (
-        tile_size[0] != tile_size[1] or overlap[0] != overlap[1]
-    ):
-        pytest.skip(
-            "This equalizer currently only works for square tiles/overlaps"
-        )
 
     tiles = to_tile(imcamera, tile_size, overlap)
 
@@ -178,20 +171,13 @@ def test_both_equalize_init(
 @pytest.mark.parametrize(
     "equalizer",
     (
-        (False, lambda t, i: tiler.estimate_corrections_seq(t, i)),
-        (True, lambda t, i: tiler.estimate_corrections(t, i)),
+        lambda t, i: tiler.estimate_corrections_seq(t, i),
+        lambda t, i: tiler.estimate_corrections(t, i),
     ),
 )
 def test_both_equalize_9changes(
     imcamera, tile_size, overlap, init, equalizer
 ):
-    only_square, equalizer = equalizer
-    if only_square and (
-        tile_size[0] != tile_size[1] or overlap[0] != overlap[1]
-    ):
-        pytest.skip(
-            "This equalizer currently only works for square tiles/overlaps"
-        )
 
     tiles = to_tile(imcamera, tile_size, overlap)
 

@@ -361,6 +361,30 @@ def estimate_corrections_seq(
 def build_overlap_matrix(tiles: adapters.TiledImage):
     """Takes overlapping regions.
 
+    Strategy:
+
+    In matrices M1 and M2, different overlap regions (in the second dimension)
+    will be stored linearized (in the first dimension) in matrices M1 and M2.
+
+    1. In a REFerence tile at (ndx0, ndx1)
+       pick a NEIghbour (ndx0 + 1, ndx1)
+    2. take the flattened pixels in REF and store them in M1
+    3. take the flattened pixels in NEI and store them in M2
+    4. Pick the NEIghbour (ndx0, ndx1 + 1) and repeat 3 and 4.
+    5. Repeat 1 to 4 by iterating aver all tiles in sequential order (see `yield_overlaps`).
+
+    In the process
+
+    +----------+
+    |    REF   |
+    +----------+
+          +----------+
+          |    NEI   |
+          +----------+
+    +-----+----+-----+
+    | R   | ov |   N |
+    +-----+----+-----+
+
     Parameters
     ----------
     tiles : adapters.TiledImage
@@ -373,34 +397,56 @@ def build_overlap_matrix(tiles: adapters.TiledImage):
          Overlap regions in the neighbour tile, connection matrix between tile and correction)
     """
 
+    assert tiles.is_filled, "This routine only works for filled images"
+
     tsh = tiles.tile_shape
     overlap = tiles.overlap
-
-    assert tiles.is_filled, "This routine only works for filled images"
-    assert (
-        overlap[0] == overlap[1]
-    ), "This routine only works for equal overlaps"
-    assert tsh[0] == tsh[1], "This routine only works for square tiles"
 
     gsh = tiles.grid_shape
     count_tiles = gsh[0] * gsh[1]
 
-    count_overlap_pixels = overlap[0] * tsh[0]
     count_overlap_regions = (
         4 * count_tiles - 2 * gsh[0] - 2 * gsh[1]
     ) // 2
 
+    # Number of overlap pixels in both directions.
+    count_overlap_pixels0 = overlap[0] * tsh[1]
+    count_overlap_pixels1 = overlap[1] * tsh[0]
+
+    # We distinguish to cases depending if the number of pixels in the "horizontal" or "vertical"
+    # overlap regions are the same or not.
+    # In the second case we will need to create a larger matrix (wih a lot of zeros)
+    # to keep the equation simple.
+    isotropic = count_overlap_pixels0 == count_overlap_pixels1
+    if isotropic:
+        count_overlap_pixels = count_overlap_pixels0
+    else:
+        count_overlap_pixels = (
+            count_overlap_pixels0 + count_overlap_pixels1
+        )
+
+    # M1 and M2 will store the overlapping regions for the reference and neighbour tile.
     M1 = np.zeros((count_overlap_pixels, count_overlap_regions))
     M2 = np.zeros((count_overlap_pixels, count_overlap_regions))
 
+    # P1 and P2 is a convenience matrix to link the overlaping regions to the actual tile.
     P1 = np.zeros((count_overlap_regions, count_tiles))
     P2 = np.zeros((count_overlap_regions, count_tiles))
 
     for ndx, (ref_ndx, nei_ndx, ref_ov_im, nei_ov_im) in enumerate(
         yield_overlaps(tiles)
     ):
-        M1[:, ndx] = ref_ov_im.flatten()
-        M2[:, ndx] = nei_ov_im.flatten()
+        ref, nei = ref_ov_im.flatten(), nei_ov_im.flatten()
+
+        if isotropic:
+            M1[:, ndx] = ref
+            M2[:, ndx] = nei
+        elif len(ref) == count_overlap_pixels0:
+            M1[:count_overlap_pixels0, ndx] = ref
+            M2[:count_overlap_pixels0, ndx] = nei
+        else:
+            M1[count_overlap_pixels0:, ndx] = ref
+            M2[count_overlap_pixels0:, ndx] = nei
 
         linear_ref_ndx = np.ravel_multi_index(ref_ndx, gsh)
         linear_nei_ndx = np.ravel_multi_index(nei_ndx, gsh)
@@ -416,9 +462,18 @@ def estimate_corrections(
     norm_key: adapters.IntPair = (0, 0),
     norm_value: float = 1.0,
 ):
-    """Estimate correction via total least square.
+    """Estimate correction for each tile via total least square.
 
-    As there is an arbitrary scaling factor, the result element norm_key is pinned to norm_value.
+    Strategy: Solve the following equation
+
+    M1 @ P1 @ C = M2 @ P2 @ C + B
+
+    where matrices M1 and M2 contains the overlap region of reference and neighbour tiles.
+    (reference and neighbour are arbitrary as one tile that is a reference in one case,
+    will be a neighbour in another, see `build_overlap_matrix`)
+    and C is a vector containing the correction factor for each tile.
+    As given any solution C, a scaled vector will be solution as well (including the null solution),
+    we use B to pin the element norm_key to norm_value.
 
     Parameters
     ----------
