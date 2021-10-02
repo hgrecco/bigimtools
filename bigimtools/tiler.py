@@ -367,3 +367,95 @@ def estimate_corrections_seq(
         out[center] = corr
 
     return out
+
+
+def build_overlap_matrix(tiles: adapters.TiledImage):
+    """Takes overlapping regions.
+
+    Parameters
+    ----------
+    tiles : adapters.TiledImage
+        An tiled image.
+
+    Returns
+    -------
+    np.ndarray, np.ndarray, np.ndarray, np.ndarray
+        (Overlap regions in the center tile, connection matrix between tile and correction
+         Overlap regions in the neighbour tile, connection matrix between tile and correction)
+    """
+
+    tsh = tiles.tile_shape
+    overlap = tiles.overlap
+
+    assert tiles.is_filled, "This routine only works for filled images"
+    assert (
+        overlap[0] == overlap[1]
+    ), "This routine only works for equal overlaps"
+    assert tsh[0] == tsh[1], "This routine only works for square tiles"
+
+    gsh = tiles.grid_shape
+    count_tiles = gsh[0] * gsh[1]
+
+    count_overlap_pixels = overlap[0] * tsh[0]
+    count_overlap_regions = (
+        4 * count_tiles - 2 * gsh[0] - 2 * gsh[1]
+    ) // 2
+
+    M1 = np.zeros((count_overlap_pixels, count_overlap_regions))
+    M2 = np.zeros((count_overlap_pixels, count_overlap_regions))
+
+    P1 = np.zeros((count_overlap_regions, count_tiles))
+    P2 = np.zeros((count_overlap_regions, count_tiles))
+
+    for ndx, (ref_ndx, nei_ndx, ref_ov_im, nei_ov_im) in enumerate(
+        yield_overlaps(tiles)
+    ):
+        M1[:, ndx] = ref_ov_im.flatten()
+        M2[:, ndx] = nei_ov_im.flatten()
+
+        linear_ref_ndx = np.ravel_multi_index(ref_ndx, gsh)
+        linear_nei_ndx = np.ravel_multi_index(nei_ndx, gsh)
+
+        P1[ndx, linear_ref_ndx] = 1.0
+        P2[ndx, linear_nei_ndx] = 1.0
+
+    return M1, P1, M2, P2
+
+
+def estimate_corrections(
+    tiles: adapters.TiledImage,
+    norm_key: adapters.IntPair = (0, 0),
+    norm_value: float = 1.0,
+):
+    """Estimate correction via total least square.
+
+    As there is an arbitrary scaling factor, the result element norm_key is pinned to norm_value.
+
+    Parameters
+    ----------
+    tiles : adapters.TiledImage
+        An tiled image.
+    norm_key : (int, int)
+    norm_value : float
+
+    Returns
+    -------
+    dict[(int, int), float]
+    """
+    M1, P1, M2, P2 = build_overlap_matrix(tiles)
+
+    newM = np.zeros((M1.shape[0] + 1, P1.shape[1]))
+    newM[:-1, :] = M1 @ P1 - M2 @ P2
+    newM[
+        -1, np.ravel_multi_index(norm_key, tiles.grid_shape)
+    ] = norm_value
+
+    b = np.zeros(newM.shape[0])
+    b[-1] = 1
+
+    sol, residuals, *_ = np.linalg.lstsq(newM, b, rcond=None)
+
+    return {
+        np.unravel_index(k, tiles.grid_shape): sol[k]
+        for k in range(sol.size)
+    }
