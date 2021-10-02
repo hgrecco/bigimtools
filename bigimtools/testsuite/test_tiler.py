@@ -17,14 +17,14 @@ def to_tile(im, tile_size, overlap):
     )
 
 
-def assert_tiledict_almost_equal(actual, desired, **kwargs):
+def assert_tiledict_all_close(actual, desired, **kwargs):
     actual = adapters.TiledImage.from_dict(actual, 0)
     actual = actual.reduce(lambda x: x)
 
     desired = adapters.TiledImage.from_dict(desired, 0)
     desired = desired.reduce(lambda x: x)
 
-    np.testing.assert_almost_equal(desired, actual, **kwargs)
+    np.testing.assert_allclose(desired, actual, **kwargs)
 
 
 def test_tiled_mixin(imcamera):
@@ -61,7 +61,7 @@ def test_round_trip(imcamera, tile_size, overlap):
     merge = tiler.join_tiles(tiles)
 
     sh = imcamera.shape
-    np.testing.assert_almost_equal(merge[: sh[0], : sh[1]], imcamera)
+    np.testing.assert_allclose(merge[: sh[0], : sh[1]], imcamera)
 
 
 @pytest.mark.parametrize("tile_size", TEST_TILE_SIZES)
@@ -97,7 +97,7 @@ def test_equalize_simple1(
     grount_truth = {k: 2 for k, v in corrections.items()}
     grount_truth[init] = 1.0
 
-    assert_tiledict_almost_equal(corrections, grount_truth)
+    assert_tiledict_all_close(corrections, grount_truth)
 
 
 @pytest.mark.parametrize("tile_size", TEST_TILE_SIZES)
@@ -133,7 +133,7 @@ def test_equalize_simple2(
     grount_truth = {k: 3 for k, v in corrections.items()}
     grount_truth[init] = 1.0
 
-    assert_tiledict_almost_equal(corrections, grount_truth)
+    assert_tiledict_all_close(corrections, grount_truth)
 
 
 @pytest.mark.parametrize("tile_size", TEST_TILE_SIZES)
@@ -144,9 +144,7 @@ def test_equalize(imcamera, tile_size, overlap, init):
     merge = tiler.join_tiles(tiles, tiler.ConstantDict(13))
 
     sh = imcamera.shape
-    np.testing.assert_almost_equal(
-        merge[: sh[0], : sh[1]], 13 * imcamera
-    )
+    np.testing.assert_allclose(merge[: sh[0], : sh[1]], 13 * imcamera)
 
 
 @pytest.mark.parametrize("tile_size", TEST_TILE_SIZES)
@@ -176,11 +174,20 @@ def test_equalize_change_init(
 
     corrections = equalizer(tiles, init)
 
+    for k, v in corrections.items():
+        if k == init:
+            assert np.isclose(v, 1.0)
+        else:
+            assert np.isclose(v, 13.0)
+
     merge = tiler.join_tiles(tiles, corrections)
 
     sh = imcamera.shape
-    np.testing.assert_almost_equal(
-        merge[: sh[0], : sh[1]], imcamera * 13.0
+    merge = merge[: sh[0], : sh[1]]
+
+    np.testing.assert_allclose(
+        merge,
+        imcamera * 13.0,
     )
 
 
@@ -244,7 +251,7 @@ def test_equalize_simple():
     result = tiler.estimate_corrections(
         adapters.TiledImage.from_dict(tiles, overlap)
     )
-    assert_tiledict_almost_equal(result, {(0, 0): 1, (0, 1): 1 / 2})
+    assert_tiledict_all_close(result, {(0, 0): 1, (0, 1): 1 / 2})
 
 
 # Crashes test suite! Beware

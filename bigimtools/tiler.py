@@ -15,23 +15,6 @@ import numpy as np
 from . import adapters
 
 
-class ConstantDict:
-    """Dummy container class that only returns a single value."""
-
-    def __init__(self, value):
-        self.value = value
-
-    def __getitem__(self, item):
-        return self.value
-
-    def get(self, item, default):
-        return self.value
-
-
-_NaNArray = ConstantDict(np.nan)
-_OneArray = ConstantDict(1)
-
-
 def split_into_tiles(
     img,
     tile_size: adapters.IntPair,
@@ -96,7 +79,7 @@ def split_into_tiles(
 
 def join_tiles(
     tiles: adapters.TiledImage,
-    corrections: dict[adapters.IntPair, float] = _OneArray,
+    corrections: dict[adapters.IntPair, float] = None,
     out=None,
 ):
     """Join tiles into a single image.
@@ -116,32 +99,35 @@ def join_tiles(
     """
 
     tsz0, tsz1 = tiles.tile_shape
-
-    overlap = tiles.overlap
-
-    ov0, ov1 = overlap
+    ov0, ov1 = tiles.overlap
 
     if out is None:
         gsz0, gsz1 = tiles.grid_shape
         out = np.zeros(
             (gsz0 * (tsz0 - ov0), gsz1 * (tsz1 - ov1)),
-            dtype=tiles.dtype,
+            dtype=tiles.dtype if corrections is None else np.float,
         )
 
     for (ndx0, ndx1), tile in tiles.items():
         fr0 = ndx0 * (tsz0 - ov0)
         fr1 = ndx1 * (tsz1 - ov1)
+
+        this_tile = tile[: -ov0 or None, : -ov1 or None]
+
+        if corrections is not None:
+            this_tile = this_tile * corrections.get((ndx0, ndx1), 1)
+
         # The or None is to allow for 0 overlap.
-        out[fr0 : (fr0 + tsz0 - ov0), fr1 : (fr1 + tsz1 - ov1)] = tile[
-            : -ov0 or None, : -ov1 or None
-        ] * corrections.get((ndx0, ndx1), 1)
+        out[
+            fr0 : (fr0 + tsz0 - ov0), fr1 : (fr1 + tsz1 - ov1)
+        ] = this_tile
 
     return out
 
 
 def correct_tiles(
     tiles: adapters.TiledImage,
-    corrections: dict[adapters.IntPair, float] = _OneArray,
+    corrections: dict[adapters.IntPair, float] = None,
     out=None,
 ):
     """Correct tiles by multiplying each by a factor.
@@ -166,9 +152,12 @@ def correct_tiles(
         out = {}
 
     for (ndx0, ndx1), tile in tiles.items():
-        out[ndx0, ndx1] = tile[:-ov0, :-ov1] * corrections.get(
-            (ndx0, ndx1), 1
-        )
+        out[ndx0, ndx1] = tile[:-ov0, :-ov1]
+
+        if corrections is not None:
+            out[ndx0, ndx1] = out[ndx0, ndx1] * corrections.get(
+                (ndx0, ndx1), 1
+            )
 
     return out
 
